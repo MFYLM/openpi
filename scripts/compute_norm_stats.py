@@ -22,6 +22,7 @@ class RemoveStrings(transforms.DataTransformFn):
 
 def create_dataset(config: _config.TrainConfig) -> tuple[_config.DataConfig, _data_loader.Dataset]:
     data_config = config.data.create(config.assets_dirs, config.model)
+    print(f"Data config: {data_config}")
     if data_config.repo_id is None:
         raise ValueError("Data config must have a repo_id")
     dataset = _data_loader.create_dataset(data_config, config.model)
@@ -40,7 +41,6 @@ def create_dataset(config: _config.TrainConfig) -> tuple[_config.DataConfig, _da
 def main(config_name: str, max_frames: int | None = None):
     config = _config.get_config(config_name)
     data_config, dataset = create_dataset(config)
-
     num_frames = len(dataset)
     shuffle = False
 
@@ -50,7 +50,7 @@ def main(config_name: str, max_frames: int | None = None):
 
     data_loader = _data_loader.TorchDataLoader(
         dataset,
-        local_batch_size=1,
+        local_batch_size=2,
         num_workers=8,
         shuffle=shuffle,
         num_batches=num_frames,
@@ -58,7 +58,6 @@ def main(config_name: str, max_frames: int | None = None):
 
     keys = ["state", "actions"]
     stats = {key: normalize.RunningStats() for key in keys}
-
     for batch in tqdm.tqdm(data_loader, total=num_frames, desc="Computing stats"):
         for key in keys:
             values = np.asarray(batch[key][0])

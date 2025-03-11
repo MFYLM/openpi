@@ -252,6 +252,7 @@ class TokenizePrompt(DataTransformFn):
         return {**data, "tokenized_prompt": tokens, "tokenized_prompt_mask": token_masks}
 
 
+# TODO: modify tokenizer to support more complex state input
 @dataclasses.dataclass(frozen=True)
 class TokenizeFASTInputs(DataTransformFn):
     tokenizer: _tokenizer.FASTTokenizer

@@ -44,7 +44,7 @@ class Args:
 
     # If provided, will be used in case the "prompt" key is not present in the data, or if the model doesn't have a default
     # prompt.
-    default_prompt: str | None = None
+    default_prompt: str | None = "pick cube using right arm, pass it to left arm and put it down. Then pick cube using left arm and pass it to right arm"
 
     # Port to serve the policy on.
     port: int = 8000

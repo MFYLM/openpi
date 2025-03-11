@@ -3,11 +3,14 @@ assets/
 checkpoints/
 data/
 wandb/
+pour_water/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+
+
 
 # C extensions
 *.so

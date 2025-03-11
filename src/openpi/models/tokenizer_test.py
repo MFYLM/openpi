@@ -25,3 +25,13 @@ def test_fast_tokenizer():
 
     act = tokenizer.extract_actions(tokens, 3, 2)
     assert act.shape == (3, 2)
+
+
+# Added for testing 6d pose prediction
+def test_obj_encode_tokenizer():
+    tokenizer = _tokenizer.FASTTokenizer(max_len=256)
+    obj_state = np.random.rand(256).astype(np.float32)
+    tokens = tokenizer.extract_obj_state(obj_state)
+    assert tokens.shape == (256,)
+    
+    

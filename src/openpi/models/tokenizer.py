@@ -1,5 +1,6 @@
 import logging
 
+from cv2 import log
 import numpy as np
 import sentencepiece
 from transformers import AutoProcessor
@@ -48,6 +49,7 @@ class FASTTokenizer:
         # Instantiate FAST tokenizer
         self._fast_tokenizer = AutoProcessor.from_pretrained(fast_tokenizer_path, trust_remote_code=True)
         self._fast_skip_tokens = 128  # Skip last 128 tokens in PaliGemma vocab since they are special tokens
+        self._prev_obj_state = None  # Keep track of previous object state
 
     def tokenize(
         self, prompt: str, state: np.ndarray, actions: np.ndarray | None
@@ -61,7 +63,7 @@ class FASTTokenizer:
         state_str = " ".join(map(str, discretized_state))
         prefix = f"Task: {cleaned_text}, State: {state_str};\n"
         prefix_tokens = self._paligemma_tokenizer.encode(prefix, add_bos=True)
-
+        
         if actions is not None:
             # Tokenize actions with FAST tokenizer --> map to last tokens in PaliGemma vocab
             action_tokens = self._fast_tokenizer(actions[None])[0]
@@ -103,6 +105,100 @@ class FASTTokenizer:
             loss_mask = loss_mask[: self._max_len]
 
         return np.asarray(tokens), np.asarray(token_mask), np.asarray(ar_mask), np.asarray(loss_mask)
+    
+    # Added for enabling 6d pose prediction
+    def tokenize_with_obj_state(
+        self, 
+        prompt: str, 
+        current_obj_state: np.ndarray,      # current state (input)
+        next_obj_state: np.ndarray | None,  # next state (target)
+        actions: np.ndarray | None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        cleaned_text = prompt.lower().strip().replace("_", " ")
+        
+        # Discretize input state (current)
+        discretized_current = np.digitize(current_obj_state, bins=np.linspace(-1, 1, 256 + 1)[:-1]) - 1
+        current_state_str = " ".join(map(str, discretized_current))
+        
+        prefix = f"Task: {cleaned_text}, Object State: {current_state_str};\n"
+        prefix_tokens = self._paligemma_tokenizer.encode(prefix, add_bos=True)
+        
+        postfix_tokens = []
+        if actions is not None and next_obj_state is not None:
+            action_tokens = self._fast_tokenizer(actions[None])[0]
+            action_tokens_in_pg = self._act_tokens_to_paligemma_tokens(action_tokens)
+            
+            # Tokenize next state
+            discretized_next = np.digitize(next_obj_state, bins=np.linspace(-1, 1, 256 + 1)[:-1]) - 1
+            next_state_str = " ".join(map(str, discretized_next))
+            next_state_tokens = self._paligemma_tokenizer.encode(next_state_str)
+            
+            # TODO: does order matter?
+            # Convention: postfix contains 'Action:' followed by FAST tokens, followed by '|'
+            postfix_tokens = (
+                self._paligemma_tokenizer.encode("Action: ")
+                + action_tokens_in_pg.tolist()
+                + self._paligemma_tokenizer.encode("|")
+                + self._paligemma_tokenizer.encode("Object State: ")
+                + next_state_tokens
+                + self._paligemma_tokenizer.encode("|")
+            )
+        
+        # Combine tokens and create masks
+        tokens = prefix_tokens + postfix_tokens
+        token_mask = [True] * len(tokens)
+        ar_mask = [0] * len(prefix_tokens) + [1] * len(postfix_tokens)
+        loss_mask = [False] * len(prefix_tokens) + [True] * len(postfix_tokens)
+
+        # Pad tokens to max length
+        pad_len = self._max_len - len(tokens)
+        if pad_len > 0:
+            padding = [False] * pad_len
+            tokens = tokens + padding
+            token_mask = token_mask + padding
+            ar_mask = ar_mask + padding
+            loss_mask = loss_mask + padding
+        else:
+            if len(tokens) > self._max_len:
+                logging.warning(
+                    f"Token length ({len(tokens)}) exceeds max length ({self._max_len}), truncating. "
+                )
+            tokens = tokens[:self._max_len]
+            token_mask = token_mask[:self._max_len]
+            ar_mask = ar_mask[:self._max_len]
+            loss_mask = loss_mask[:self._max_len]
+
+        return (
+            np.array(tokens),
+            np.array(token_mask),
+            np.array(ar_mask),
+            np.array(loss_mask),
+        )
+
+    def extract_obj_state(self, tokens: np.ndarray) -> np.ndarray:
+        # Decode tokens to text
+        decoded = self._paligemma_tokenizer.decode(tokens.tolist())
+        
+        # Extract object state string
+        if "Object State: " not in decoded or "|" not in decoded:
+            return np.zeros(6, dtype=np.float32)
+        
+        state_part = decoded.split("Object State: ")[1].split("|")[0].strip()
+        try:
+            discretized = list(map(int, state_part.split()))
+        except ValueError:
+            logging.warning("Failed to extract object state from tokens!")
+            return np.zeros(6, dtype=np.float32)
+        
+        # Convert to continuous values
+        bins = np.linspace(-1, 1, 257)  # 257 edges for 256 bins
+        midpoints = (bins[:-1] + bins[1:]) / 2
+        if len(discretized) != 6:
+            return np.zeros(6, dtype=np.float32)
+        
+        # Clip to valid bin indices and get midpoints
+        discretized = np.clip(discretized, 0, 255)
+        return np.array([midpoints[i] for i in discretized], dtype=np.float32)
 
     def extract_actions(self, tokens: np.ndarray, action_horizon: int, action_dim: int) -> np.ndarray:
         # Decode predicted output tokens
@@ -120,8 +216,13 @@ class FASTTokenizer:
         return self._fast_tokenizer.decode(
             [action_tokens.tolist()], time_horizon=action_horizon, action_dim=action_dim
         )[0]
+        
+    def extract_obj_state(self, tokens: np.ndarray) -> np.ndarray:
+        # Decode predicted output tokens
+        pass
 
     def _act_tokens_to_paligemma_tokens(self, tokens: np.ndarray | list[int]) -> np.ndarray:
         if isinstance(tokens, list):
             tokens = np.array(tokens)
+        # only keep tokens that are not in the skip tokens
         return self._paligemma_tokenizer.vocab_size() - 1 - self._fast_skip_tokens - tokens
