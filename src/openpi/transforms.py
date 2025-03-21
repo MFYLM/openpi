@@ -321,14 +321,14 @@ class ExtractFASTObjState(DataTransformFn):
     tokenizer: _tokenizer.FASTTokenizer
 
     def __call__(self, data: DataDict) -> DataDict:
-        if "obj_state" not in data:
+        if "obj_pose" not in data:
             return data
         # Model outputs are saved in "obj_state", but for FAST models they represent tokens.
-        tokens = data.pop("obj_state")
-        obj_state = self.tokenizer.extract_obj_state(tokens.astype(np.int32))
+        tokens = data.pop("obj_pose")
+        obj_pose = self.tokenizer.extract_obj_pose(tokens.astype(np.int32))
         return {
             **data,
-            "obj_state": obj_state,
+            "obj_pose": obj_pose,
         }
 
 

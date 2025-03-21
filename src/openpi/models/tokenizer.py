@@ -116,13 +116,13 @@ class FASTTokenizer:
         cleaned_text = prompt.lower().strip().replace("_", " ")
         
         robot_state = state["robot_state"]
-        obj_state = state["obj_state"]
+        obj_pose = state["obj_pose"]
         ee_pose = state["ee_pose"]
         
         # Discretize input state
         discretized_state = np.digitize(robot_state, bins=np.linspace(-1, 1, 256 + 1)[:-1]) - 1
         robot_state_str = " ".join(map(str, discretized_state))
-        discretized_obj = np.digitize(obj_state, bins=np.linspace(-1, 1, 256 + 1)[:-1]) - 1
+        discretized_obj = np.digitize(obj_pose, bins=np.linspace(-1, 1, 256 + 1)[:-1]) - 1
         obj_str = " ".join(map(str, discretized_obj))
         discretized_ee = np.digitize(ee_pose, bins=np.linspace(-1, 1, 256 + 1)[:-1]) - 1
         ee_str = " ".join(map(str, discretized_ee))
@@ -135,20 +135,18 @@ class FASTTokenizer:
             # Tokenize next state
             discretized_next = np.digitize(next_obj_state, bins=np.linspace(-1, 1, 256 + 1)[:-1]) - 1
             next_state_str = " ".join(map(str, discretized_next))
+            print(f"discretized_next: {discretized_next}, shape: {discretized_next.shape}")
+            print(f"next_state_str: {next_state_str}, length: {len(next_state_str)}")
             next_state_tokens = self._paligemma_tokenizer.encode(next_state_str)
             
             # generate pose flow first
             # Convention: postfix contains 'Action:' followed by FAST tokens, followed by '|'
             postfix_tokens = (
-                # self._paligemma_tokenizer.encode("Action: ")
-                # + action_tokens_in_pg.tolist()
-                # + self._paligemma_tokenizer.encode("|")
-                self._paligemma_tokenizer.encode("Object State: ")
+                self._paligemma_tokenizer.encode("Next Object State: ")
                 + next_state_tokens
                 + self._paligemma_tokenizer.encode("|")
             )
             
-        
         # Combine tokens and create masks
         tokens = prefix_tokens + postfix_tokens
         token_mask = [True] * len(tokens)
@@ -180,7 +178,7 @@ class FASTTokenizer:
             np.array(loss_mask),
         )
 
-    def extract_obj_state(self, tokens: np.ndarray) -> np.ndarray:
+    def extract_obj_pose(self, tokens: np.ndarray) -> np.ndarray:
         # Decode tokens to text
         decoded = self._paligemma_tokenizer.decode(tokens.tolist())
         
@@ -188,9 +186,9 @@ class FASTTokenizer:
         if "Object State: " not in decoded or "|" not in decoded:
             return np.zeros(6, dtype=np.float32)
         
-        state_part = decoded.split("Object State: ")[1].split("|")[0].strip()
+        state_part = decoded.split("Next Object State: ")[1].split("|")[0].strip()
         try:
-            discretized = list(map(int, state_part.split()))
+            discretized = list(map(int, state_part.strip("[]").split()))
         except ValueError:
             logging.warning("Failed to extract object state from tokens!")
             return np.zeros(6, dtype=np.float32)
@@ -199,6 +197,7 @@ class FASTTokenizer:
         bins = np.linspace(-1, 1, 257)  # 257 edges for 256 bins
         midpoints = (bins[:-1] + bins[1:]) / 2
         if len(discretized) != 6:
+            logging.warning("Discretized object state has incorrect length!")
             return np.zeros(6, dtype=np.float32)
         
         # Clip to valid bin indices and get midpoints

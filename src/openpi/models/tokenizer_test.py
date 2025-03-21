@@ -28,10 +28,27 @@ def test_fast_tokenizer():
 
 
 # Added for testing 6d pose prediction
-def test_obj_encode_tokenizer():
+def test_fast_state_tokenizer():
+    prompt = "Hello, world!"
+    state = {
+        "robot_state": np.random.rand(1, 5).astype(np.float32),
+        "obj_pose": np.random.rand(1, 6).astype(np.float32),
+        "ee_pose": np.random.rand(1, 6).astype(np.float32),
+    }
+    next_obj_pose = np.random.rand(1, 6).astype(np.float32)
     tokenizer = _tokenizer.FASTTokenizer(max_len=256)
-    obj_state = np.random.rand(256).astype(np.float32)
-    tokens = tokenizer.extract_obj_state(obj_state)
+    tokens, token_masks, ar_masks, loss_masks = tokenizer.tokenize_with_additional_state(prompt, state, next_obj_pose)
+
     assert tokens.shape == (256,)
+    assert token_masks.shape == (256,)
+    assert ar_masks.shape == (256,)
+    assert loss_masks.shape == (256,)
+
+    pred_obj_pose = tokenizer.extract_obj_pose(tokens)
+    assert pred_obj_pose.shape[-1] == 6
     
+    
+if __name__ == "__main__":
+    test_fast_tokenizer()
+    test_fast_state_tokenizer()
     
