@@ -291,6 +291,45 @@ class ExtractFASTActions(DataTransformFn):
             **data,
             "actions": actions,
         }
+        
+        
+# Modified to adapt dict input for state
+@dataclasses.dataclass(frozen=True)
+class TokenizeFASTInputWithState(DataTransformFn):
+    tokenizer: _tokenizer.FASTTokenizer
+
+    def __call__(self, data: DataDict) -> DataDict:
+        if (prompt := data.pop("prompt", None)) is None:
+            raise ValueError("Prompt is required")
+
+        if not isinstance(prompt, str):
+            prompt = prompt.item()
+
+        state, actions = data["state"], data.get("actions")
+        tokens, token_mask, ar_mask, loss_mask = self.tokenizer.tokenize_with_additional_state(prompt, state, actions)
+        return {
+            **data,
+            "tokenized_prompt": tokens,
+            "tokenized_prompt_mask": token_mask,
+            "token_ar_mask": ar_mask,
+            "token_loss_mask": loss_mask,
+        }
+
+    
+@dataclasses.dataclass(frozen=True)
+class ExtractFASTObjState(DataTransformFn):
+    tokenizer: _tokenizer.FASTTokenizer
+
+    def __call__(self, data: DataDict) -> DataDict:
+        if "obj_state" not in data:
+            return data
+        # Model outputs are saved in "obj_state", but for FAST models they represent tokens.
+        tokens = data.pop("obj_state")
+        obj_state = self.tokenizer.extract_obj_state(tokens.astype(np.int32))
+        return {
+            **data,
+            "obj_state": obj_state,
+        }
 
 
 @dataclasses.dataclass(frozen=True)

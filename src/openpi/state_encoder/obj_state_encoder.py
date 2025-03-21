@@ -7,7 +7,6 @@ import flax.nnx as nnx
 from openpi.shared import array_typing as at
 from jaxtyping import Array
 
-from im2Flow2Act.tapnet.kubric.test.test_traits import obj
 
 class ObjStateEncoderConfig(_model.BaseEncoderConfig):
     encoder_type: _model.EncoderType = _model.EncoderType.OBJ_POSE

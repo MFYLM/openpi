@@ -107,42 +107,47 @@ class FASTTokenizer:
         return np.asarray(tokens), np.asarray(token_mask), np.asarray(ar_mask), np.asarray(loss_mask)
     
     # Added for enabling 6d pose prediction
-    def tokenize_with_obj_state(
+    def tokenize_with_additional_state(
         self, 
         prompt: str, 
-        current_obj_state: np.ndarray,      # current state (input)
-        next_obj_state: np.ndarray | None,  # next state (target)
-        actions: np.ndarray | None,
+        state: dict[str, np.ndarray],
+        next_obj_state: np.ndarray | None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         cleaned_text = prompt.lower().strip().replace("_", " ")
         
-        # Discretize input state (current)
-        discretized_current = np.digitize(current_obj_state, bins=np.linspace(-1, 1, 256 + 1)[:-1]) - 1
-        current_state_str = " ".join(map(str, discretized_current))
+        robot_state = state["robot_state"]
+        obj_state = state["obj_state"]
+        ee_pose = state["ee_pose"]
         
-        prefix = f"Task: {cleaned_text}, Object State: {current_state_str};\n"
+        # Discretize input state
+        discretized_state = np.digitize(robot_state, bins=np.linspace(-1, 1, 256 + 1)[:-1]) - 1
+        robot_state_str = " ".join(map(str, discretized_state))
+        discretized_obj = np.digitize(obj_state, bins=np.linspace(-1, 1, 256 + 1)[:-1]) - 1
+        obj_str = " ".join(map(str, discretized_obj))
+        discretized_ee = np.digitize(ee_pose, bins=np.linspace(-1, 1, 256 + 1)[:-1]) - 1
+        ee_str = " ".join(map(str, discretized_ee))
+        
+        prefix = f"Task: {cleaned_text}, State: {robot_state_str}, EE Pose: {ee_str}, Object State: {obj_str};\n"
         prefix_tokens = self._paligemma_tokenizer.encode(prefix, add_bos=True)
         
         postfix_tokens = []
-        if actions is not None and next_obj_state is not None:
-            action_tokens = self._fast_tokenizer(actions[None])[0]
-            action_tokens_in_pg = self._act_tokens_to_paligemma_tokens(action_tokens)
-            
+        if next_obj_state is not None:
             # Tokenize next state
             discretized_next = np.digitize(next_obj_state, bins=np.linspace(-1, 1, 256 + 1)[:-1]) - 1
             next_state_str = " ".join(map(str, discretized_next))
             next_state_tokens = self._paligemma_tokenizer.encode(next_state_str)
             
-            # TODO: does order matter?
+            # generate pose flow first
             # Convention: postfix contains 'Action:' followed by FAST tokens, followed by '|'
             postfix_tokens = (
-                self._paligemma_tokenizer.encode("Action: ")
-                + action_tokens_in_pg.tolist()
-                + self._paligemma_tokenizer.encode("|")
-                + self._paligemma_tokenizer.encode("Object State: ")
+                # self._paligemma_tokenizer.encode("Action: ")
+                # + action_tokens_in_pg.tolist()
+                # + self._paligemma_tokenizer.encode("|")
+                self._paligemma_tokenizer.encode("Object State: ")
                 + next_state_tokens
                 + self._paligemma_tokenizer.encode("|")
             )
+            
         
         # Combine tokens and create masks
         tokens = prefix_tokens + postfix_tokens
@@ -216,10 +221,6 @@ class FASTTokenizer:
         return self._fast_tokenizer.decode(
             [action_tokens.tolist()], time_horizon=action_horizon, action_dim=action_dim
         )[0]
-        
-    def extract_obj_state(self, tokens: np.ndarray) -> np.ndarray:
-        # Decode predicted output tokens
-        pass
 
     def _act_tokens_to_paligemma_tokens(self, tokens: np.ndarray | list[int]) -> np.ndarray:
         if isinstance(tokens, list):

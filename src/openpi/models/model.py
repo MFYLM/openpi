@@ -18,6 +18,7 @@ import orbax.checkpoint as ocp
 from openpi.shared import image_tools
 import openpi.shared.array_typing as at
 
+
 logger = logging.getLogger("openpi")
 
 ArrayT = TypeVar("ArrayT", at.Array, jax.ShapeDtypeStruct)
@@ -28,6 +29,7 @@ class ModelType(enum.Enum):
 
     PI0 = "pi0"
     PI0_FAST = "pi0_fast"
+    PI0_FAST_STATE = "pi0_fast_state"
 
 
 # The model always expects these images
@@ -127,6 +129,63 @@ class Observation(Generic[ArrayT]):
         result["image"] = result.pop("images")
         result["image_mask"] = result.pop("image_masks")
         return result
+    
+
+@at.typecheck
+@struct.dataclass
+class ObservationWithState(Generic[ArrayT]):
+    """Holds observations, i.e., inputs to the model.
+
+    See `Observation.from_dict` to see the expected dictionary form. This is the format
+    that should be produced by the data transforms.
+    """
+
+    # Images, in [-1, 1] float32.
+    images: dict[str, at.Float[ArrayT, "*b h w c"]]
+    # Image masks, with same keys as images.
+    image_masks: dict[str, at.Bool[ArrayT, "*b"]]
+    # Flexible state contains unified state.
+    # keys: ["robot_state", "obj_pose", "ee_pose"]
+    state: dict[str, ArrayT]
+    
+    # Tokenized prompt.
+    tokenized_prompt: at.Int[ArrayT, "*b l"] | None = None
+    # Tokenized prompt mask.
+    tokenized_prompt_mask: at.Bool[ArrayT, "*b l"] | None = None
+
+    # pi0-fast model specific fields.
+
+    # Token auto-regressive mask (for FAST autoregressive model).
+    token_ar_mask: at.Int[ArrayT, "*b l"] | None = None
+    # Token loss mask (for FAST autoregressive model).
+    token_loss_mask: at.Bool[ArrayT, "*b l"] | None = None
+
+    @classmethod
+    def from_dict(cls, data: at.PyTree[ArrayT]) -> "Observation[ArrayT]":
+        """This method defines the mapping between unstructured data (i.e., nested dict) to the structured Observation format."""
+        # Ensure that tokenized_prompt and tokenized_prompt_mask are provided together.
+        if ("tokenized_prompt" in data) != ("tokenized_prompt_mask" in data):
+            raise ValueError("tokenized_prompt and tokenized_prompt_mask must be provided together.")
+        # If images are uint8, convert them to [-1, 1] float32.
+        for key in data["image"]:
+            if data["image"][key].dtype == np.uint8:
+                data["image"][key] = data["image"][key].astype(np.float32) / 255.0 * 2.0 - 1.0
+        return cls(
+            images=data["image"],
+            image_masks=data["image_mask"],
+            state=data["state"],
+            tokenized_prompt=data.get("tokenized_prompt"),
+            tokenized_prompt_mask=data.get("tokenized_prompt_mask"),
+            token_ar_mask=data.get("token_ar_mask"),
+            token_loss_mask=data.get("token_loss_mask"),
+        )
+
+    def to_dict(self) -> at.PyTree[ArrayT]:
+        """Convert the Observation to a nested dict."""
+        result = dataclasses.asdict(self)
+        result["image"] = result.pop("images")
+        result["image_mask"] = result.pop("image_masks")
+        return result
 
 
 # Defines the format of the actions. This field is included as "actions" inside the dictionary
@@ -149,7 +208,7 @@ def preprocess_observation(
     if not set(image_keys).issubset(observation.images):
         raise ValueError(f"images dict missing keys: expected {image_keys}, got {list(observation.images)}")
 
-    batch_shape = observation.state.shape[:-1]
+    batch_shape = observation.state["robot_state"].shape[:-1]
 
     out_images = {}
     for key in image_keys:
@@ -191,6 +250,73 @@ def preprocess_observation(
             out_masks[key] = jnp.asarray(observation.image_masks[key])
 
     return Observation(
+        images=out_images,
+        image_masks=out_masks,
+        state=observation.state,
+        tokenized_prompt=observation.tokenized_prompt,
+        tokenized_prompt_mask=observation.tokenized_prompt_mask,
+        token_ar_mask=observation.token_ar_mask,
+        token_loss_mask=observation.token_loss_mask,
+    )
+    
+    
+def preprocess_observation_with_state(
+    rng: at.KeyArrayLike | None,
+    observation: ObservationWithState,
+    *,
+    train: bool = False,
+    image_keys: Sequence[str] = IMAGE_KEYS,
+    image_resolution: tuple[int, int] = IMAGE_RESOLUTION,
+) -> Observation:
+    """Preprocess the observations by performing image augmentations (if train=True), resizing (if necessary), and
+    filling in a default image mask (if necessary).
+    """
+
+    if not set(image_keys).issubset(observation.images):
+        raise ValueError(f"images dict missing keys: expected {image_keys}, got {list(observation.images)}")
+
+    batch_shape = observation.state["robot_state"].shape[:-1]
+
+    out_images = {}
+    for key in image_keys:
+        image = observation.images[key]
+        if image.shape[1:3] != image_resolution:
+            logger.info(f"Resizing image {key} from {image.shape[1:3]} to {image_resolution}")
+            image = image_tools.resize_with_pad(image, *image_resolution)
+
+        if train:
+            # Convert from [-1, 1] to [0, 1] for augmax.
+            image = image / 2.0 + 0.5
+
+            transforms = []
+            if "wrist" not in key:
+                height, width = image.shape[1:3]
+                transforms += [
+                    augmax.RandomCrop(int(width * 0.95), int(height * 0.95)),
+                    augmax.Resize(width, height),
+                    augmax.Rotate((-5, 5)),
+                ]
+            transforms += [
+                augmax.ColorJitter(brightness=0.3, contrast=0.4, saturation=0.5),
+            ]
+            sub_rngs = jax.random.split(rng, image.shape[0])
+            image = jax.vmap(augmax.Chain(*transforms))(sub_rngs, image)
+
+            # Back to [-1, 1].
+            image = image * 2.0 - 1.0
+
+        out_images[key] = image
+
+    # obtain mask
+    out_masks = {}
+    for key in out_images:
+        if key not in observation.image_masks:
+            # do not mask by default
+            out_masks[key] = jnp.ones(batch_shape, dtype=jnp.bool)
+        else:
+            out_masks[key] = jnp.asarray(observation.image_masks[key])
+    
+    return ObservationWithState(
         images=out_images,
         image_masks=out_masks,
         state=observation.state,
