@@ -34,7 +34,7 @@ def test_pi0_fast_gemma_lora():
     assert all("_1" not in p for p in state)
 
 
-def test_pi0__fast_all_lora():
+def test_pi0_fast_state_all_lora():
     config = _pi0.Pi0FASTStateConfig(paligemma_variant="gemma_2b_lora")
     state = _get_frozen_state(config)
     # sum of gemma_lora and action_expert_lora's frozen params.
@@ -67,5 +67,5 @@ def test_sample_obj_states():
 if __name__ == "__main__":
     test_pi0_fast_full_finetune()
     test_pi0_fast_gemma_lora()
-    test_pi0__fast_all_lora()
+    test_pi0_fast_state_all_lora()
     test_sample_obj_states()

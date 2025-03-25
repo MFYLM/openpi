@@ -305,8 +305,8 @@ class TokenizeFASTInputWithState(DataTransformFn):
         if not isinstance(prompt, str):
             prompt = prompt.item()
 
-        state, actions = data["state"], data.get("actions")
-        tokens, token_mask, ar_mask, loss_mask = self.tokenizer.tokenize_with_additional_state(prompt, state, actions)
+        state, obj_pose = data["state"], data["obj_pose"]
+        tokens, token_mask, ar_mask, loss_mask = self.tokenizer.tokenize_with_additional_state(prompt, state, obj_pose)
         return {
             **data,
             "tokenized_prompt": tokens,
