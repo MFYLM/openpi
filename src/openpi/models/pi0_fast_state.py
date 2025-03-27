@@ -194,7 +194,7 @@ class Pi0FASTState(_model.BaseModel):
 
     @override
     def compute_loss(
-        self, rng: at.KeyArrayLike, observation: _model.ObservationWithState, obj_pose: jnp.ndarray, *, train: bool = False
+        self, rng: at.KeyArrayLike, observation: _model.ObservationWithState, actions: jnp.ndarray, *, train: bool = False
     ) -> at.Float[at.Array, "*b ah"]:
         observation = _model.preprocess_observation_with_state(
             rng, observation, train=train, image_keys=list(observation.images.keys())
@@ -313,71 +313,69 @@ class Pi0FASTState(_model.BaseModel):
         *,
         max_decoding_steps: int | at.Int[at.Array, ""] = 256,
         temperature: float = 0.0,
-    ) -> _model.Actions:
-        
-        return jnp.zeros((1, self.action_dim, self.action_horizon), dtype=jnp.int32)
-        # # TODO: this is a hack to get the image keys.
-        # observation = _model.preprocess_observation(
-        #     None, observation, train=False, image_keys=list(observation.images.keys())
-        # )
+    ) -> _model.Actions:        
+        # TODO: this is a hack to get the image keys.
+        observation = _model.preprocess_observation(
+            None, observation, train=False, image_keys=list(observation.images.keys())
+        )
 
-        # # embed inputs
-        # prefix_token_embeddings, prefix_mask, prefix_ar_mask = self.embed_inputs(observation)
-        # prefix_attn_mask = make_attn_mask(prefix_mask, prefix_ar_mask)
+        # embed inputs
+        prefix_token_embeddings, prefix_mask, prefix_ar_mask = self.embed_inputs(observation)
+        prefix_attn_mask = make_attn_mask(prefix_mask, prefix_ar_mask)
 
-        # # left to right align all input token sequences
-        # prefix_token_embeddings, prefix_mask, prefix_attn_mask = left_to_right_align(
-        #     prefix_token_embeddings, prefix_mask, prefix_attn_mask
-        # )
-        # prefill_size = prefix_token_embeddings.shape[1]
-        # prefill_len = jnp.sum(prefix_mask, axis=-1)
-        # prefix_start = prefill_size - prefill_len
+        # left to right align all input token sequences
+        prefix_token_embeddings, prefix_mask, prefix_attn_mask = left_to_right_align(
+            prefix_token_embeddings, prefix_mask, prefix_attn_mask
+        )
+        prefill_size = prefix_token_embeddings.shape[1]
+        prefill_len = jnp.sum(prefix_mask, axis=-1)
+        prefix_start = prefill_size - prefill_len
 
-        # # first fill KV cache with a forward pass of the prefix
-        # # pad attention mask to set the size of the KV cache (prefill_size + max_decoding_steps)
-        # prefix_attn_mask = jnp.pad(prefix_attn_mask, ((0, 0), (0, 0), (0, max_decoding_steps)))
-        # prefix_positions = jnp.cumsum(prefix_mask, axis=-1) - 1
-        # prefix_logits, kv_cache, _ = self.PaliGemma.llm(
-        #     embedded_prefix=prefix_token_embeddings, mask=prefix_attn_mask, positions=prefix_positions, decode=True
-        # )
+        # first fill KV cache with a forward pass of the prefix
+        # pad attention mask to set the size of the KV cache (prefill_size + max_decoding_steps)
+        prefix_attn_mask = jnp.pad(prefix_attn_mask, ((0, 0), (0, 0), (0, max_decoding_steps)))
+        prefix_positions = jnp.cumsum(prefix_mask, axis=-1) - 1
+        prefix_logits, kv_cache, _ = self.PaliGemma.llm(
+            embedded_prefix=prefix_token_embeddings, mask=prefix_attn_mask, positions=prefix_positions, decode=True
+        )
 
-        # # prepare decoding -- final logit decodes the first token
-        # last_logit = prefix_logits[:, -1:]
-        # output_tokens = jnp.zeros((last_logit.shape[0], max_decoding_steps))
+        # prepare decoding -- final logit decodes the first token
+        last_logit = prefix_logits[:, -1:]
+        output_tokens = jnp.zeros((last_logit.shape[0], max_decoding_steps))
 
-        # def step(carry):
-        #     last_logit, output_tokens, cache, _, step = carry
+        def step(carry):
+            last_logit, output_tokens, cache, _, step = carry
 
-        #     # Sample token from last logit
-        #     if temperature > 0.0:
-        #         last_logit = last_logit / temperature
-        #         token = jax.random.categorical(rng, last_logit, axis=-1)
-        #     else:
-        #         token = jnp.argmax(last_logit, axis=-1)
-        #     output_tokens = put_along_last_axis(output_tokens, jnp.broadcast_to(step, (token.shape[0], 1)), token)
+            # Sample token from last logit
+            if temperature > 0.0:
+                last_logit = last_logit / temperature
+                token = jax.random.categorical(rng, last_logit, axis=-1)
+            else:
+                token = jnp.argmax(last_logit, axis=-1)
+            output_tokens = put_along_last_axis(output_tokens, jnp.broadcast_to(step, (token.shape[0], 1)), token)
 
-        #     # Check for early stopping --> stop if all batch elements have EOS token
-        #     has_eos = jnp.any(token == PALIGEMMA_EOS_TOKEN, axis=-1)
-        #     all_eos = jnp.all(has_eos)
+            # Check for early stopping --> stop if all batch elements have EOS token
+            has_eos = jnp.any(token == PALIGEMMA_EOS_TOKEN, axis=-1)
+            all_eos = jnp.all(has_eos)
 
-        #     # Decode one step
-        #     token_embedding = self.PaliGemma.llm(token, embed_only=True)
-        #     positions = prefill_len[:, None] + step + 1
-        #     mask = jnp.logical_and(
-        #         jnp.arange(prefill_size + max_decoding_steps)[None, None, :] >= prefix_start[:, None, None],
-        #         jnp.arange(prefill_size + max_decoding_steps)[None, None, :]
-        #         < (jnp.broadcast_to(prefill_size + step + 1, (prefix_start.shape[0], 1, 1))),
-        #     )
-        #     last_logit, kv_cache, _ = self.PaliGemma.llm(
-        #         embedded_prefix=token_embedding, mask=mask, positions=positions, decode=True, kv_cache=cache
-        #     )
+            # Decode one step
+            token_embedding = self.PaliGemma.llm(token, embed_only=True)
+            positions = prefill_len[:, None] + step + 1
+            mask = jnp.logical_and(
+                jnp.arange(prefill_size + max_decoding_steps)[None, None, :] >= prefix_start[:, None, None],
+                jnp.arange(prefill_size + max_decoding_steps)[None, None, :]
+                < (jnp.broadcast_to(prefill_size + step + 1, (prefix_start.shape[0], 1, 1))),
+            )
+            last_logit, kv_cache, _ = self.PaliGemma.llm(
+                embedded_prefix=token_embedding, mask=mask, positions=positions, decode=True, kv_cache=cache
+            )
 
-        #     return last_logit, output_tokens, kv_cache, all_eos, step + 1
+            return last_logit, output_tokens, kv_cache, all_eos, step + 1
 
-        # def cond(carry):
-        #     _, _, _, all_eos, step = carry
-        #     return (~all_eos) & (step < max_decoding_steps)
+        def cond(carry):
+            _, _, _, all_eos, step = carry
+            return (~all_eos) & (step < max_decoding_steps)
 
-        # # Use lax.while_loop so we can jit the full decoding loop.
-        # _, output_tokens, _, _, _ = jax.lax.while_loop(cond, step, (last_logit, output_tokens, kv_cache, False, 0))
-        # return output_tokens
+        # Use lax.while_loop so we can jit the full decoding loop.
+        _, output_tokens, _, _, _ = jax.lax.while_loop(cond, step, (last_logit, output_tokens, kv_cache, False, 0))
+        return output_tokens

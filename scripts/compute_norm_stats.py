@@ -56,9 +56,14 @@ def main(config_name: str, max_frames: int | None = None):
         num_batches=num_frames,
     )
 
-    keys = ["state", "actions"]
+    # keys = ["state", "actions"]
+    # Added keys for state dict input
+    keys = ["robot_state", "obj_pose", "ee_pose", "actions"]
+    
     stats = {key: normalize.RunningStats() for key in keys}
     for batch in tqdm.tqdm(data_loader, total=num_frames, desc="Computing stats"):
+        # import ipdb; ipdb.set_trace()
+        # handle state dict
         for key in keys:
             values = np.asarray(batch[key][0])
             stats[key].update(values.reshape(-1, values.shape[-1]))

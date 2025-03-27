@@ -9,6 +9,7 @@ import numpy as np
 from openpi_client import image_tools
 
 from openpi.models import tokenizer as _tokenizer
+from openpi.models import model as _model
 from openpi.shared import array_typing as at
 from openpi.shared import normalize as _normalize
 
@@ -305,8 +306,13 @@ class TokenizeFASTInputWithState(DataTransformFn):
         if not isinstance(prompt, str):
             prompt = prompt.item()
 
-        state, obj_pose = data["state"], data["obj_pose"]
-        tokens, token_mask, ar_mask, loss_mask = self.tokenizer.tokenize_with_additional_state(prompt, state, obj_pose)
+        state = {k: data[k] for k in _model.STATE_KEYS}
+        actions = data["actions"]
+        tokens, token_mask, ar_mask, loss_mask = self.tokenizer.tokenize_with_additional_state(
+                                                        prompt,
+                                                        state,
+                                                        actions
+                                                    )
         return {
             **data,
             "tokenized_prompt": tokens,

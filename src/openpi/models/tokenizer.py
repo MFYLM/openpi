@@ -111,14 +111,14 @@ class FASTTokenizer:
         self, 
         prompt: str, 
         state: dict[str, np.ndarray],
-        next_obj_state: np.ndarray | None,
+        actions: np.ndarray | None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         cleaned_text = prompt.lower().strip().replace("_", " ")
         
         robot_state = state["robot_state"]
         obj_pose = state["obj_pose"]
         ee_pose = state["ee_pose"]
-        
+                
         # Discretize input state
         discretized_state = np.digitize(robot_state, bins=np.linspace(-1, 1, 256 + 1)[:-1]) - 1
         robot_state_str = " ".join(map(str, discretized_state))
@@ -131,18 +131,16 @@ class FASTTokenizer:
         prefix_tokens = self._paligemma_tokenizer.encode(prefix, add_bos=True)
         
         postfix_tokens = []
-        if next_obj_state is not None:
+        if actions is not None:
             # Tokenize next state
-            discretized_next = np.digitize(next_obj_state, bins=np.linspace(-1, 1, 256 + 1)[:-1]) - 1
+            discretized_next = np.digitize(actions, bins=np.linspace(-1, 1, 256 + 1)[:-1]) - 1
             next_state_str = " ".join(map(str, discretized_next))
-            print(f"discretized_next: {discretized_next}, shape: {discretized_next.shape}")
-            print(f"next_state_str: {next_state_str}, length: {len(next_state_str)}")
             next_state_tokens = self._paligemma_tokenizer.encode(next_state_str)
             
             # generate pose flow first
             # Convention: postfix contains 'Action:' followed by FAST tokens, followed by '|'
             postfix_tokens = (
-                self._paligemma_tokenizer.encode("Next Object State: ")
+                self._paligemma_tokenizer.encode("Action: ")
                 + next_state_tokens
                 + self._paligemma_tokenizer.encode("|")
             )

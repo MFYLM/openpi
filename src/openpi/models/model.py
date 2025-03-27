@@ -39,6 +39,12 @@ IMAGE_KEYS = (
     "right_wrist_0_rgb",
 )
 
+STATE_KEYS = (
+    "robot_state",
+    "obj_pose",
+    "ee_pose",
+)
+
 
 # This may need change if we release a small model.
 IMAGE_RESOLUTION = (224, 224)
@@ -173,7 +179,7 @@ class ObservationWithState(Generic[ArrayT]):
         return cls(
             images=data["image"],
             image_masks=data["image_mask"],
-            state=data["state"],
+            state={ k: data[k] for k in STATE_KEYS },
             tokenized_prompt=data.get("tokenized_prompt"),
             tokenized_prompt_mask=data.get("tokenized_prompt_mask"),
             token_ar_mask=data.get("token_ar_mask"),
