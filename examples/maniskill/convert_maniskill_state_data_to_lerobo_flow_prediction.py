@@ -113,8 +113,8 @@ def main(data_path: str, *, control_mode: str = "pd_ee_delta_pose", push_to_hub:
             ee_pose_6d = convert_sapien_pose_to_6d(tcp_pose)
 
             # Prepare state
-            robot_state = np.concatenate([qpos, qvel], axis=1)  # shape: [n, 12]
-            obj_pose = np.concatenate([source_pose_6d, target_pose_6d], axis=1)  # shape: [n, 18]
+            robot_state = np.concatenate([qpos, qvel], axis=1)  # shape: [n, 18]
+            obj_pose = np.concatenate([source_pose_6d, target_pose_6d], axis=1)  # shape: [n, 12]
 
             assert (
                 robot_state.shape[1] == config["state_shapes"]["robot_state"][0]

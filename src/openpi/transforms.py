@@ -159,9 +159,17 @@ class Unnormalize(DataTransformFn):
             return data
 
         # Make sure that all the keys in the norm stats are present in the data.
+        # import ipdb; ipdb.set_trace()
+        
+        # filter stats of outputs
+        selectors = {}
+        for k in data.keys():
+            if k in self.norm_stats:
+                selectors[k] = self.norm_stats[k]
+            
         return apply_tree(
             data,
-            self.norm_stats,
+            selectors,
             self._unnormalize_quantile if self.use_quantiles else self._unnormalize,
             strict=True,
         )
@@ -307,7 +315,9 @@ class TokenizeFASTInputWithState(DataTransformFn):
             prompt = prompt.item()
 
         state = {k: data[k] for k in _model.STATE_KEYS}
-        actions = data["actions"]
+        actions = None
+        if "actions" in data: 
+            actions = data["actions"]
         tokens, token_mask, ar_mask, loss_mask = self.tokenizer.tokenize_with_additional_state(
                                                         prompt,
                                                         state,

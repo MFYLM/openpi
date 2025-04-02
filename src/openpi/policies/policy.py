@@ -64,9 +64,12 @@ class Policy(BasePolicy):
         inputs = jax.tree.map(lambda x: jnp.asarray(x)[np.newaxis, ...], inputs)
 
         self._rng, sample_rng = jax.random.split(self._rng)
+        
+        # import ipdb; ipdb.set_trace()
+        
         outputs = {
-            "state": inputs["state"],
-            "obj_state": self._sample_actions(sample_rng, _model.ObservationWithState.from_dict(inputs), **self._sample_kwargs),
+            "obj_pose": inputs["obj_pose"],
+            "actions": self._sample_actions(sample_rng, _model.ObservationWithState.from_dict(inputs), **self._sample_kwargs),
         }
 
         # Unbatch and convert to np.ndarray.

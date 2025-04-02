@@ -733,12 +733,12 @@ _CONFIGS = [
                 local_files_only=True,  # Set to True for local-only datasets.
                 prompt_from_task=True,
             ),
-            default_prompt="pick the red cube and move to the goal target shown in green sphere",
+            default_prompt="pick up the green cup and pour the water inside the cup into the white plate on the right of the cup",
             default_control_mode="ee_delta_pose_6d_flow",
             use_delta_actions=False,  # NOTE: because we have processed the delta flow in the dataset, we don't need to use delta actions
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_fast_base/params"),
-        num_train_steps=30_000,
+        num_train_steps=10_000,
         freeze_filter=pi0_fast_state.Pi0FASTStateConfig(
             action_dim=6, action_horizon=10, max_token_len=450, paligemma_variant="gemma_2b_lora"
         ).get_freeze_filter(),

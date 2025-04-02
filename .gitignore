@@ -4,6 +4,8 @@ checkpoints/
 data/
 wandb/
 pour_water/
+PourManiskill/
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
